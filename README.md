@@ -30,8 +30,8 @@
 ## ✨ Features
 
 ### Core Functionality
-- 🎤 **Voice Activation** - "Guard my room" with fuzzy matching ("guide my room" also works)
-- 👤 **Face Recognition** - dlib ResNet-34 CNN (99.38% accuracy on LFW benchmark)
+- 🎤 **Voice Activation** - "Guard my room" with fuzzy matching 
+- 👤 **Face Recognition** - dlib ResNet-34 CNN 
 - 💬 **LLM Conversation** - Phi-3 powered intelligent escalating dialogue
 - 🚨 **Continuous Police Siren** - Realistic alarm until intruder leaves or trusted person enters
 - 🎯 **Intruder Database** - Persistent tracking and recognition of repeat offenders
