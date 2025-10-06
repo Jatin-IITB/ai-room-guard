@@ -1,5 +1,5 @@
 """
-AI Room Guard - Main System (FIXED VERSION)
+AI Room Guard - Main System (PRODUCTION VERSION)
 """
 import time
 import threading
@@ -19,8 +19,11 @@ from state_manager import StateManager
 from guard_activator import GuardActivator
 from logger import PerformanceLogger
 from siren import EmergencySiren
+from alerts import AlertSystem
+
+
 class AIRoomGuard:
-    """Complete AI Room Guard System - FIXED"""
+    """Complete AI Room Guard System"""
     
     def __init__(self):
         print("\n" + "="*60)
@@ -36,18 +39,26 @@ class AIRoomGuard:
         self.agent = ConversationAgent(LLM_MODEL)
         self.logger = PerformanceLogger()
         self.siren = EmergencySiren(SIREN_VOLUME)
+        
+        if ALERTS_ENABLED:
+            self.alert_system = AlertSystem()
+        else:
+            self.alert_system = None
+            print("⚠️ Alerts disabled in config")
+        
         # State
         self.conversation_queue = Queue()
         self.speaking = False
         self.listening = False
         self.last_greeted = {}
-        self.conversation_lock = threading.Lock()  # ✅ Prevent overlapping conversations
+        self.conversation_lock = threading.Lock()
         self.start_time = time.time()
+        
         print("✅ ALL SYSTEMS READY!")
         print("="*60)
     
     def wait_for_activation(self):
-        """Wait for voice activation with continuous mode"""
+        """Wait for voice activation"""
         print("\n" + "="*60)
         print("🎧 VOICE ACTIVATION")
         print("="*60)
@@ -55,7 +66,6 @@ class AIRoomGuard:
         print("(The system will keep listening until you say it)")
         print("="*60 + "\n")
         
-        # Use continuous listening mode
         if self.activator.listen_for_activation_continuous():
             self.logger.log_activation(
                 phrase_heard=self.activator.last_heard,
@@ -87,7 +97,6 @@ class AIRoomGuard:
     def listen_async(self):
         """Non-blocking listening"""
         def _listen():
-            # Wait for speaking to finish
             while self.speaking:
                 time.sleep(0.2)
             
@@ -124,22 +133,20 @@ class AIRoomGuard:
         self.speak_async(greeting)
     
     def handle_conversation_turn(self, intruder_reply=None):
-        """Handle one conversation turn - thread-safe"""
+        """Handle one conversation turn"""
         def _converse():
-            with self.conversation_lock:  # ✅ Prevent overlapping
+            with self.conversation_lock:
                 response = self.agent.get_response(user_input=intruder_reply)
                 self.logger.log_conversation(
                     level=self.agent.escalation_level,
                     guard_response=response,
                     intruder_input=intruder_reply
                 )
-                # Wait a bit before speaking if still processing previous
+                
                 while self.speaking or self.listening:
                     time.sleep(0.3)
                 
                 self.speak_async(response)
-                
-                # Wait for speech to finish before listening
                 time.sleep(0.5)
                 self.listen_async()
         
@@ -154,17 +161,20 @@ class AIRoomGuard:
         print("Press 'q' to quit | 'd' to deactivate\n")
         
         self.camera.start()
-        time.sleep(1)  # ✅ Let camera stabilize
+        time.sleep(1)
         
+        # State variables
         unknown_count = 0
         last_check_time = time.time()
         in_conversation = False
         waiting_for_response = False
         intruder_encoding = None
         intruder_added = False
-        consecutive_unknown = 0  # ✅ Track consecutive unknown frames
-        siren_active=False
-        frames_since_clear=0
+        consecutive_unknown = 0
+        siren_active = False
+        frames_since_clear = 0
+        alerted_intruders = set()
+        current_intruder_id = None
         
         try:
             while self.state.guard_active:
@@ -175,95 +185,138 @@ class AIRoomGuard:
                 
                 current_time = time.time()
                 
-                # ✅ ONLY do face recognition when NOT in active conversation
-                if not in_conversation and not self.speaking and not self.listening:
-                    if (current_time - last_check_time >= FACE_RECOGNITION_INTERVAL):
+                # FACE RECOGNITION (always check, even during conversation)
+                if (current_time - last_check_time >= FACE_RECOGNITION_INTERVAL):
+                    
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    face_locations = face_recognition.face_locations(rgb_frame)
+                    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                    
+                    results = []
+                    for encoding in face_encodings:
+                        name, intruder_id = self.recognizer._identify_face(encoding)
+                        if name != "Unknown":
+                            if self.recognizer.known_encodings:
+                                distances = face_recognition.face_distance(self.recognizer.known_encodings, encoding)
+                                confidence = 1 - min(distances) if len(distances) > 0 else 0.0
+                                self.logger.log_recognition(name=name, confidence=confidence, correct=True)
+                        results.append((name, intruder_id, encoding))
+                    
+                    has_unknown = any(name in ["Unknown", "REPEAT_INTRUDER"] for name, _, _ in results)
+                    has_known = any(name not in ["Unknown", "REPEAT_INTRUDER"] for name, _, _ in results)
+                    
+                    # PRIORITY 1: Stop siren if trusted person detected
+                    if siren_active and has_known:
+                        print("\n✅ TRUSTED PERSON DETECTED - STOPPING SIREN\n")
+                        self.siren.stop()
+                        siren_active = False
                         
-                        # Face recognition
-                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        face_locations = face_recognition.face_locations(rgb_frame)
-                        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+                        for name, _, _ in results:
+                            if name not in ["Unknown", "REPEAT_INTRUDER"]:
+                                self.speak_async(f"Welcome {name}! Alarm deactivated.")
                         
-                        results = []
-                        for encoding in face_encodings:
-                            name, intruder_id = self.recognizer._identify_face(encoding)
-                            if name!= "Unknown":
-                                if self.recognizer.known_encodings:
-                                    distances = face_recognition.face_distance(self.recognizer.known_encodings, encoding)
-                                    confidence= 1- min(distances) if len(distances)>0 else 0.0
-                                    self.logger.log_recognition(name=name, confidence=confidence, correct=True)
-                            results.append((name, intruder_id, encoding))
-                        
-                        has_unknown = any(name in ["Unknown", "REPEAT_INTRUDER"] for name, _, _ in results)
-                        has_known = any(name not in ["Unknown", "REPEAT_INTRUDER"] for name, _, _ in results)
-                        if siren_active and has_known:
-                            print("✅ Trusted person detected - stopping siren")
+                        # Reset all state
+                        in_conversation = False
+                        waiting_for_response = False
+                        unknown_count = 0
+                        consecutive_unknown = 0
+                        intruder_encoding = None
+                        intruder_added = False
+                        current_intruder_id = None
+                        self.agent.reset()
+                        self.state.end_conversation()
+                        last_check_time = current_time
+                        continue
+                    
+                    # PRIORITY 2: Stop siren if room clear
+                    if siren_active and not has_unknown and not has_known:
+                        frames_since_clear += 1
+                        if frames_since_clear >= 30:
+                            print("\n✅ ROOM CLEAR - STOPPING SIREN\n")
                             self.siren.stop()
-                            siren_active=False
-                            for name, _, _ in results:
-                                if name not in ["Unknown", "REPEAT_INTRUDER"]:
-                                    self.speak_async(f"Welcome {name}! Alarm deactivated.")
-                            in_conversation=False
-                            waiting_for_response=False
-                            unknown_count=0
+                            siren_active = False
+                            self.speak_async("Intruder has left. Alarm Deactivated")
+                            
+                            # Reset all state
+                            in_conversation = False
+                            waiting_for_response = False
+                            unknown_count = 0
+                            consecutive_unknown = 0
+                            intruder_encoding = None
+                            intruder_added = False
+                            current_intruder_id = None
+                            frames_since_clear = 0
                             self.agent.reset()
                             self.state.end_conversation()
+                            last_check_time = current_time
                             continue
-                        if siren_active and not has_unknown and not has_known:
-                            frames_since_clear+=1
-                            if frames_since_clear>=30: # 30 frames ~1 second
-                                print("✅ ROOM CLEAR - STOPPING SIREN")
-                                self.siren.stop()
-                                siren_active=False
-                                self.speak_async("Intruder has left. Alarm Deactivated")
-
-                                #Reset State
-                                in_conversation=False
-                                waiting_for_response=False
-                                unknown_count=0
-                                self.agent.reset()
-                                self.state.end_conversation()
-                                frames_since_clear=0
-                                continue
-                        else:
-                            frames_since_clear=0
-                        # ✅ Greet known people (only if no conversation)
+                    else:
+                        frames_since_clear = 0
+                    
+                    # NEW DETECTIONS (only if not in conversation)
+                    if not in_conversation and not self.speaking and not self.listening:
+                        
+                        # Greet known people
                         if has_known and not siren_active:
-                            for name, intruder_id, _ in results:
+                            for name, _, _ in results:
                                 if name not in ["Unknown", "REPEAT_INTRUDER"]:
                                     self.greet_known_person(name)
                             
-                            # Reset unknown count
                             if unknown_count > 0:
                                 print("✅ Trusted person. Resetting.")
                                 unknown_count = 0
                                 consecutive_unknown = 0
+                                intruder_encoding = None
                         
-                        # ✅ Handle unknowns with stricter criteria
+                        # Handle unknowns
                         if has_unknown and not has_known and not siren_active:
                             consecutive_unknown += 1
                             
-                            # Only count if seen in multiple consecutive frames
-                            if consecutive_unknown >= 2:  # ✅ Must appear 2+ times
+                            if consecutive_unknown >= 2:
                                 unknown_count += 1
                                 consecutive_unknown = 0
                                 print(f"⚠️ Unknown person! ({unknown_count}/{UNKNOWN_THRESHOLD})")
                                 
-                                # Save evidence
                                 os.makedirs(CAPTURES_DIR, exist_ok=True)
                                 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                
+                                current_intruder_id = None
+                                is_repeat_intruder = False
                                 
                                 for name, intruder_id, encoding in results:
                                     if name == "REPEAT_INTRUDER":
                                         print(f"🚨 KNOWN INTRUDER: {intruder_id}")
+                                        current_intruder_id = intruder_id
+                                        is_repeat_intruder = True
+                                        
+                                        if self.alert_system and intruder_id not in alerted_intruders:
+                                            intruder_image_path = None
+                                            for filename in os.listdir(INTRUDER_DB_DIR):
+                                                if intruder_id in filename and filename.endswith('.jpg'):
+                                                    intruder_image_path = os.path.join(INTRUDER_DB_DIR, filename)
+                                                    break
+                                            
+                                            if intruder_image_path:
+                                                print(f"\n🚨 REPEAT INTRUDER ALERT: {intruder_id}")
+                                                print("📨 Sending immediate alert...")
+                                                
+                                                alert_thread = threading.Thread(
+                                                    target=self.alert_system.send_repeat_intruder_alert,
+                                                    args=(intruder_id, intruder_image_path),
+                                                    daemon=True
+                                                )
+                                                alert_thread.start()
+                                                alerted_intruders.add(intruder_id)
+                                        
                                         self.speak_async(f"Alert! Known intruder {intruder_id} detected!")
+                                        self.agent.escalation_level = 2
+                                    
                                     elif name == "Unknown":
                                         intruder_encoding = encoding
                                 
                                 filepath = os.path.join(CAPTURES_DIR, f"intruder_{timestamp}.jpg")
                                 self.camera.save_frame(frame, filepath)
                                 
-                                # Start conversation
                                 if unknown_count >= UNKNOWN_THRESHOLD:
                                     self.state.detect_intruder()
                                     self.state.start_conversation()
@@ -271,15 +324,17 @@ class AIRoomGuard:
                                     waiting_for_response = True
                                     
                                     print("\n💬 STARTING CONVERSATION\n")
-                                    time.sleep(0.5)  # ✅ Brief pause
+                                    if is_repeat_intruder:
+                                        print(f"⚠️ Starting at Level {self.agent.escalation_level}")
+                                    
+                                    time.sleep(0.5)
                                     self.handle_conversation_turn(intruder_reply=None)
                         else:
-                            # Reset consecutive counter if no unknown
                             consecutive_unknown = 0
-                        
-                        last_check_time = current_time
+                    
+                    last_check_time = current_time
                 
-                # ✅ Handle intruder responses (only when ready)
+                # CONVERSATION HANDLING
                 if in_conversation and waiting_for_response:
                     if not self.speaking and not self.listening and not self.conversation_queue.empty():
                         intruder_reply = self.conversation_queue.get()
@@ -293,37 +348,67 @@ class AIRoomGuard:
                             
                             if self.agent.escalation_level >= MAX_ESCALATION_LEVEL:
                                 print("\n🚨 MAXIMUM ESCALATION!\n")
+                                print("🚨 ACTIVATING CONTINUOUS SIREN!\n")
                                 self.speak_async("FINAL WARNING! AUTHORITIES NOTIFIED! ALARM ACTIVATED!")
                                 time.sleep(2)
-
-                                self.siren.start()
-                                siren_active=True
-
-                                # Add to database
-                                if intruder_encoding is not None and not intruder_added:
-                                    self.recognizer.add_intruder(frame, intruder_encoding)
-                                    intruder_added = True
                                 
-                                # time.sleep(3)
-                                # in_conversation = False
+                                self.siren.start()
+                                siren_active = True
+                                
+                                # Send alerts
+                                if self.alert_system:
+                                    alert_image_path = None
+                                    alert_intruder_id = None
+                                    
+                                    if intruder_encoding is not None and not intruder_added:
+                                        new_intruder_id = self.recognizer.add_intruder(frame, intruder_encoding)
+                                        
+                                        if new_intruder_id:
+                                            intruder_added = True
+                                            alert_intruder_id = new_intruder_id
+                                            
+                                            for filename in os.listdir(INTRUDER_DB_DIR):
+                                                if new_intruder_id in filename and filename.endswith('.jpg'):
+                                                    alert_image_path = os.path.join(INTRUDER_DB_DIR, filename)
+                                                    break
+                                    
+                                    elif current_intruder_id:
+                                        alert_intruder_id = current_intruder_id
+                                        
+                                        for filename in os.listdir(INTRUDER_DB_DIR):
+                                            if current_intruder_id in filename and filename.endswith('.jpg'):
+                                                alert_image_path = os.path.join(INTRUDER_DB_DIR, filename)
+                                                break
+                                    
+                                    if alert_intruder_id and alert_image_path:
+                                        print("\n📨 Sending maximum escalation alert...")
+                                        print(f"   Intruder: {alert_intruder_id}")
+                                        print(f"   Image: {alert_image_path}")
+                                        
+                                        alert_thread = threading.Thread(
+                                            target=self.alert_system.send_all_alerts,
+                                            args=(alert_intruder_id, alert_image_path, self.agent.escalation_level),
+                                            daemon=True
+                                        )
+                                        alert_thread.start()
+                                        alerted_intruders.add(alert_intruder_id)
+                                    else:
+                                        print("⚠️ Unable to send alert - no intruder image found")
+                                
                                 waiting_for_response = False
-                                # unknown_count = 0
-                                # self.state.end_conversation()
                             else:
                                 time.sleep(0.5)
                                 self.handle_conversation_turn(intruder_reply=None)
                 
-                # ✅ Display with better annotations
+                # DISPLAY
                 display_frame = frame.copy()
                 
-                # Draw face boxes if we have results
                 if 'results' in locals() and results:
                     display_frame = self.recognizer.draw_results(display_frame, results)
                 
-                # Status overlay
                 status = "MONITORING"
                 if siren_active:
-                    status= "🚨 SIREN ACTIVE 🚨"
+                    status = "🚨 SIREN ACTIVE 🚨"
                 elif in_conversation:
                     status = f"ALERT-L{self.agent.escalation_level}"
                 if self.speaking:
@@ -331,12 +416,11 @@ class AIRoomGuard:
                 if self.listening:
                     status += " | LISTENING"
                 
-                cv2.putText(display_frame, status, (10, 30), 
+                cv2.putText(display_frame, status, (10, 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 
                 cv2.imshow('AI Room Guard', display_frame)
                 
-                # Keyboard
                 key = cv2.waitKey(30) & 0xFF
                 if key == ord('q'):
                     print("\n🛑 QUIT\n")
@@ -355,12 +439,15 @@ class AIRoomGuard:
             traceback.print_exc()
         
         finally:
+            if siren_active:
+                self.siren.stop()
             self.camera.stop()
+            cv2.destroyAllWindows()
     
     def deactivate(self):
         """Deactivate system"""
         if self.state.guard_active:
-            session_duration = (time.time() - self.start_time) / 60.0  # in minutes
+            session_duration = (time.time() - self.start_time) / 60.0
             print("\n" + "="*60)
             print(f"📊 Session Duration: {session_duration:.1f} minutes")
             
