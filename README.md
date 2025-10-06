@@ -30,10 +30,12 @@
 ## ✨ Features
 
 ### Core Functionality
-- 🎤 **Voice Activation** - "Guard my room" with fuzzy matching 
-- 👤 **Face Recognition** - dlib ResNet-34 CNN 
+- 🎤 **Voice Activation** - "Guard my room" with fuzzy matching ("guide my room" also works)
+- 👤 **Face Recognition** - dlib ResNet-34 CNN (99.38% accuracy on LFW benchmark)
 - 💬 **LLM Conversation** - Phi-3 powered intelligent escalating dialogue
 - 🚨 **Continuous Police Siren** - Realistic alarm until intruder leaves or trusted person enters
+- 📧 **Email Alerts** - Instant notifications with intruder photo attachment (Gmail)
+- 📱 **Telegram Alerts** - Real-time alerts with photo to your phone (optional)
 - 🎯 **Intruder Database** - Persistent tracking and recognition of repeat offenders
 - 📸 **Evidence Capture** - Automatic timestamped screenshots
 - 📊 **Performance Logging** - Detailed JSON analytics for evaluation
@@ -45,6 +47,7 @@
 - 🔊 **Natural TTS** - Offline pyttsx3 speech synthesis
 - 🎧 **Robust Voice Matching** - Accepts variations and Indian accent pronunciation
 - 🔐 **Auto-Disarm** - Siren stops when trusted person enters or intruder leaves
+- 🌐 **Multi-Channel Alerts** - Email + Telegram notifications with photo evidence
 
 ---
 
