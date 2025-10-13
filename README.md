@@ -8,7 +8,7 @@
 
 > Built for **EE782 Advanced Topics in Machine Learning** - IIT Bombay, October 2025
 
-[Demo Video](https://drive.google.com/file/d/1wzOdbpmabPrgZgdqfG90HXRrwHKzwbIp/view?usp=sharing) | [Report](REPORT.pdf) | [Issues](https://github.com/Jatin-IITB/ai-room-guard/issues)
+[Demo Video](https://drive.google.com/file/d/1wzOdbpmabPrgZgdqfG90HXRrwHKzwbIp/view?usp=sharing) | [Report](Report.pdf) | [Issues](https://github.com/Jatin-IITB/ai-room-guard/issues)
 
 ---
 
