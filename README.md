@@ -1018,7 +1018,7 @@ python main.py --test
 
 - **Ollama Documentation**: https://ollama.ai/docs
 - **dlib Face Recognition**: http://dlib.net/face_recognition.py.html
-- **Assignment PDF**: [EE782-A2-AI-Room-Guard.pdf](docs/assignment.pdf)
+- **Assignment PDF**: [EE782-A2-AI-Room-Guard.pdf](EE782-A2-AI-Room-Guard.pdf)
 ---
 
 ## 📊 Project Stats
